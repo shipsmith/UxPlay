@@ -70,6 +70,7 @@
 #include "renderers/video_renderer.h"
 #include "renderers/audio_renderer.h"
 #include "renderers/mux_renderer.h"
+#include "renderers/framecast_sink.h"
 #ifdef DBUS
 #include <dbus/dbus.h>
 #endif
@@ -208,6 +209,7 @@ static std::string coverart_artist;
 static std::string ble_filename = "";
 static std::string rtp_pipeline = "";
 static std::string audio_rtp_pipeline = "";
+static unsigned short framecast_port = 0;
 static GMainLoop *gmainloop = NULL;
 static bool mux_to_file = false;
 static std::string mux_filename = "recording";
@@ -1075,6 +1077,8 @@ static void print_info (char *name) {
     printf("-vrtp pl  Use rtph26[4,5]pay to send decoded video elsewhere: \"pl\"\n");
     printf("          is the remaining pipeline, starting with rtph26*pay options:\n");
     printf("          e.g. \"config-interval=1 ! udpsink host=127.0.0.1 port=5000\"\n");
+    printf("-vtcp p   Send each video frame, whole and with the client's timestamp, to a\n");
+    printf("          TCP listener on 127.0.0.1:p (framecast); use with -vs 0\n");
     printf("          Writes output to \"fn.N.mp4\"\n");
     printf("-v4l2     Use Video4Linux2 for GPU hardware h264 decoding\n");
     printf("-bt709    Sometimes needed for Raspberry Pi models using Video4Linux2 \n");
@@ -1820,6 +1824,14 @@ static void parse_arguments (int argc, char *argv[]) {
           }
 	  rtp_pipeline.erase();
 	  rtp_pipeline.append(argv[++i]);
+	} else if (arg == "-vtcp") {
+	    if (!option_has_value(i, argc, arg, argv[i+1])) exit(1);
+	    unsigned int n = 0;
+	    if (!get_value(argv[++i], &n) || n == 0 || n > 65535) {
+	        fprintf(stderr, "invalid \"-vtcp %s\"; -vtcp p : TCP port on 127.0.0.1, 1-65535\n", argv[i]);
+	        exit(1);
+	    }
+	    framecast_port = (unsigned short) n;
 	} else if (arg == "-artp") {
 	  if (!option_has_value(i, argc, arg, argv[i+1])) {
 	    fprintf(stderr,"option \"-artp\" must be followed by a pipeline for sending the audio stream:\n"
@@ -2733,6 +2745,9 @@ extern "C" void video_process (void *cls, raop_ntp_t *ntp, video_decode_struct *
     if (mux_to_file) {
         mux_renderer_push_video(data->data, data->data_len, data->ntp_time_remote);
     }
+    if (framecast_port) {
+        framecast_sink_send(data->data, data->data_len, data->is_h265, data->ntp_time_remote);
+    }
     if (use_video) {
         if (!remote_clock_offset) {
             uint64_t local_time = (data->ntp_time_local ? data->ntp_time_local : get_local_time());
@@ -3473,7 +3488,9 @@ int main (int argc, char *argv[]) {
         videosink.append("fakesink");
 	videosink_options.erase();
 	LOGI("video_disabled");
-        display[3] = 1; /* set fps to 1 frame per sec when no video will be shown */
+        if (!framecast_port) {
+            display[3] = 1; /* set fps to 1 frame per sec when no video will be shown */
+        }
     }
 
     if (fullscreen && use_video) {
@@ -3594,6 +3611,10 @@ int main (int argc, char *argv[]) {
 
     if (mux_to_file) {
         mux_renderer_init(render_logger, mux_filename.c_str(), use_audio, use_video);
+    }
+
+    if (framecast_port) {
+        framecast_sink_init(render_logger, framecast_port);
     }
 
     if (udp[0]) {
