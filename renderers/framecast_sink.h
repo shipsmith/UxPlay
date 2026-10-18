@@ -10,6 +10,10 @@
  *
  * The first frame on a new connection carries the latest parameter sets, so the receiver can
  * decode from it.
+ *
+ * A message with flags bit 1 set carries no frame but the client's identity, "<model>\n<name>"
+ * in UTF-8 (such as "iPhone18,2\nSteve's iPhone"), with time 0. It is sent when a client is
+ * admitted and again at the start of each connection.
  */
 
 #ifndef FRAMECAST_SINK_H
@@ -25,6 +29,7 @@ extern "C" {
 
 void framecast_sink_init(logger_t *logger, unsigned short port);
 void framecast_sink_send(const unsigned char *data, int length, bool h265, uint64_t pts);
+void framecast_sink_set_client(const char *model, const char *name);
 void framecast_sink_destroy(void);
 
 #ifdef __cplusplus

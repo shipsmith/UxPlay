@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -28,6 +29,10 @@ static unsigned char *parameter_sets = NULL;
 static size_t parameter_sets_length = 0;
 /* Whether the current connection has been sent parameter sets yet. */
 static bool connection_has_parameter_sets = false;
+/* The admitted client's "<model>\n<name>", sent at the start of each connection. */
+static char client[512] = "";
+
+static bool send_client(void);
 
 void framecast_sink_init(logger_t *render_logger, unsigned short listen_port) {
     logger = render_logger;
@@ -75,7 +80,7 @@ static bool ensure_connected(void) {
     fd = s;
     connection_has_parameter_sets = false;
     logger_log(logger, LOGGER_INFO, "framecast: connected to 127.0.0.1:%u", port);
-    return true;
+    return send_client();
 }
 
 static bool is_parameter_set(const unsigned char *nal, bool h265) {
@@ -183,6 +188,31 @@ void framecast_sink_send(const unsigned char *data, int length, bool h265, uint6
     }
     if (carries || prefix) {
         connection_has_parameter_sets = true;
+    }
+}
+
+/* Sends the client's identity, if known, on the current connection. */
+static bool send_client(void) {
+    size_t length = strlen(client);
+    if (!length) {
+        return true;
+    }
+    unsigned char header[HEADER_SIZE] = { 0 };
+    memcpy(header, "FCV1", 4);
+    put32(header + 4, 2);
+    put32(header + 16, (uint32_t) length);
+    struct iovec parts[2] = { { header, HEADER_SIZE }, { client, length } };
+    if (!write_all(parts, 2)) {
+        disconnect();
+        return false;
+    }
+    return true;
+}
+
+void framecast_sink_set_client(const char *model, const char *name) {
+    snprintf(client, sizeof(client), "%s\n%s", model ? model : "", name ? name : "");
+    if (fd >= 0) {
+        send_client();
     }
 }
 

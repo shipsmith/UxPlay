@@ -2701,6 +2701,9 @@ extern "C" void report_client_request(void *cls, char *deviceid, char * model, c
     if (*admit && use_video) {
         video_renderer_set_device_model(model, name);
     }
+    if (*admit && framecast_port) {
+        framecast_sink_set_client(model, name);
+    }
 }
 
 extern "C" void audio_process (void *cls, raop_ntp_t *ntp, audio_decode_struct *data) {
